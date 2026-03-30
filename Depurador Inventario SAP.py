@@ -138,6 +138,19 @@ elif opcion == "Consolidador Retail":
                     "Ecomm": pd.read_excel(file_master, sheet_name="Ecomm"),
                 }
 
+                # =========================
+                # 🧼 LIMPIAR COLUMNAS (GLOBAL)
+                # =========================
+                for k in dfs:
+                    dfs[k].columns = dfs[k].columns.str.strip()
+
+                # DEBUG opcional
+                # for k, v in dfs.items():
+                #     st.write(k, v.columns.tolist())
+
+                # =========================
+                # 📚 CATÁLOGOS
+                # =========================
                 CAT_SKU = pd.read_excel(cat_sku_raw, sheet_name="Sku_retail")
                 CAT_MOD = pd.read_excel(cat_mod_raw, sheet_name="CAT_MOD_v3")
                 CAT_SUC = pd.read_excel(cat_suc_raw, sheet_name="Sucursales RC")
@@ -158,29 +171,53 @@ elif opcion == "Consolidador Retail":
                 mapeo_ciudad = CAT_SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')['Municipio']
 
                 # =========================
-                # 🔧 FUNCIÓN GENERAL
+                # 🔧 FUNCIÓN ROBUSTA
                 # =========================
                 def procesar(df, sku_col, tienda_col, fecha_col, qty_col, canal):
 
                     df = df.copy()
+                    df.columns = df.columns.str.strip()
 
-                    # limpiar columnas
+                    def col_ok(col):
+                        return col if col in df.columns else None
+
+                    sku_col = col_ok(sku_col)
+                    tienda_col = col_ok(tienda_col)
+                    fecha_col = col_ok(fecha_col)
+                    qty_col = col_ok(qty_col)
+
+                    if sku_col is None:
+                        st.error(f"❌ {canal} no tiene columna SKU")
+                        return pd.DataFrame()
+
+                    # LIMPIEZA
                     df[sku_col] = df[sku_col].astype(str).str.strip().str.upper()
-                    df[tienda_col] = df[tienda_col].astype(str).str.strip()
 
-                    # eliminar basura tipo "resultado"
+                    if tienda_col:
+                        df[tienda_col] = df[tienda_col].astype(str).str.strip()
+                    else:
+                        df['TEMP_ID'] = "1"
+                        tienda_col = 'TEMP_ID'
+
+                    # quitar basura
                     df = df[~df[sku_col].str.contains("RESULT", case=False, na=False)]
 
-                    # fechas
-                    df[fecha_col] = pd.to_datetime(df[fecha_col], errors='coerce')
+                    # fecha
+                    if fecha_col:
+                        df['FECHA'] = pd.to_datetime(df[fecha_col], errors='coerce')
+                    else:
+                        df['FECHA'] = pd.NaT
 
                     # qty
-                    df['QTY'] = pd.to_numeric(df.get(qty_col, 1), errors='coerce')
+                    if qty_col:
+                        df['QTY'] = pd.to_numeric(df[qty_col], errors='coerce')
+                    else:
+                        df['QTY'] = 1
 
-                    # map SKU
+                    # mapeo SKU
                     df['N° ARTICULO'] = df[sku_col].map(mapeo_sku)
 
-                    # ID RETAIL
+                    # IDs
                     df['ID'] = df[tienda_col]
                     df['CANAL'] = canal
                     df['ID RETAIL'] = df['ID'].astype(str) + canal
@@ -188,13 +225,13 @@ elif opcion == "Consolidador Retail":
                     # sucursal
                     df['STORE'] = df['ID RETAIL'].map(mapeo_suc)
 
-                    # limpiar NaN críticos
+                    # limpiar
                     df = df.dropna(subset=['N° ARTICULO'])
 
                     return df.reset_index(drop=True)
 
                 # =========================
-                # 🚀 PROCESAMIENTO
+                # 🚀 PROCESAR CADENAS
                 # =========================
                 Coppel = procesar(dfs["Coppel"], "Código", "Tienda", "Fecha Venta", "QTY", "COPPEL")
                 Liverpool = procesar(dfs["Liverpool"], "Artículo", "Centro", "Día/Periodo", "Ventas Unidades", "LIVERPOOL")
@@ -204,18 +241,30 @@ elif opcion == "Consolidador Retail":
                 Bodesa = procesar(dfs["Bodesa"], "Materia", "Centro", "Fecha Vta", "Vta pzas", "BODESA")
                 Clikstore = procesar(dfs["Clikstore"], "SAP", "ID SUC", "FECHA", "Cantidad", "CLIKSTORE")
                 Cklass = procesar(dfs["Cklass"], "Material", "ID", "Fecha", "Cantidad", "CKLASS")
-                Ecomm = procesar(dfs["Ecomm"], "Unido", "Id", "Fecha  ", "Cant", "ECOMM")
+
+                # ⚠️ ECOMM especial (columna variable)
+                col_id_ecomm = "Id" if "Id" in dfs["Ecomm"].columns else dfs["Ecomm"].columns[0]
+
+                Ecomm = procesar(
+                    dfs["Ecomm"],
+                    "Unido",
+                    col_id_ecomm,
+                    "Fecha",
+                    "Cant",
+                    "ECOMM"
+                )
 
                 # =========================
                 # 🧩 CONSOLIDADO
                 # =========================
-                frames = [Coppel, Liverpool, Sears, Suburbia, Mavi, Bodesa, Clikstore, Cklass, Ecomm]
-                df_final = pd.concat(frames, ignore_index=True)
+                df_final = pd.concat(
+                    [Coppel, Liverpool, Sears, Suburbia, Mavi, Bodesa, Clikstore, Cklass, Ecomm],
+                    ignore_index=True
+                )
 
                 # =========================
                 # 📅 FECHAS
                 # =========================
-                df_final['FECHA'] = pd.to_datetime(df_final['FECHA'], errors='coerce')
                 df_final['MES'] = df_final['FECHA'].dt.month_name()
                 df_final['AÑO'] = df_final['FECHA'].dt.year
                 df_final['MES - AÑO'] = df_final['MES'] + " " + df_final['AÑO'].astype(str)
