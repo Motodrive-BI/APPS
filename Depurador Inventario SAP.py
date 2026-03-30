@@ -155,10 +155,10 @@ elif opcion == "Consolidador Retail":
                     CAT_SUC['Cadena'].astype(str).str.strip()
                 ).str.upper()
 
-                mapeo_suc = CAT_SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')['Sucursal']
+               CAT_SUC = CAT_SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')['Sucursal']
 
                 # =========================
-                # 🔥 FIX LIVERPOOL
+                # 🔥 Liverpoool
                 # =========================
                 Liverpool = Liverpool[~Liverpool['Artículo'].astype(str).str.contains('RESULT', case=False, na=False)]
                 Liverpool = Liverpool.dropna(subset=['Artículo'])
