@@ -122,6 +122,9 @@ elif opcion == "Consolidador Retail":
 
         if st.button("Procesar"):
 
+            # =========================
+            # FUNCIONES
+            # =========================
             def limpiar(df):
                 df.columns = df.columns.str.strip()
                 return df
@@ -149,21 +152,54 @@ elif opcion == "Consolidador Retail":
             map_suc = SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')
 
             # =========================
-            # PROCESAR CADA CADENA
+            # FUNCION GENERAL
             # =========================
-            def procesar(df, sku_col, id_col, fecha_col, qty_col, canal):
+            def procesar(df, sku_col, id_col, fecha_col, qty_col, canal, transformar_qty=None):
+
                 df['CANAL'] = canal
                 df[sku_col] = norm(df[sku_col])
-                df['N° ARTICULO'] = df[sku_col].map(map_item)
+                df['SKU'] = df[sku_col]
+                df['N° ARTICULO'] = df['SKU'].map(map_item)
+
                 df['ID'] = norm(df[id_col])
                 df['ID RETAIL'] = df['ID'] + canal
                 df['STORE'] = df['ID RETAIL'].map(map_suc['Sucursal'])
+
                 df['FECHA'] = pd.to_datetime(df[fecha_col], errors='coerce')
-                df['QTY'] = pd.to_numeric(df[qty_col], errors='coerce')
-                df['SKU'] = df[sku_col]
+
+                # 🔥 FIX CANTIDAD
+                if transformar_qty:
+                    df['QTY'] = transformar_qty(df)
+                else:
+                    df['QTY'] = pd.to_numeric(df[qty_col], errors='coerce')
+
                 return df[['CANAL','FECHA','SKU','QTY','N° ARTICULO','ID','STORE','ID RETAIL']]
 
-            Coppel = procesar(dfs["Coppel"], "Código", "Tienda", "Fecha Venta", "QTY", "COPPEL")
+            # =========================
+            # COPPEL (ESPECIAL)
+            # =========================
+            def qty_coppel(df):
+                mapa = {
+                    'VENTA': 1,
+                    'CANCELADA': 0,
+                    'ACTIVADA': 1,
+                    'EN TIENDA': 1
+                }
+                return df['Estatus'].astype(str).str.upper().map(mapa)
+
+            Coppel = procesar(
+                dfs["Coppel"],
+                "Código",
+                "Tienda",
+                "Fecha Venta",
+                None,
+                "COPPEL",
+                transformar_qty=qty_coppel
+            )
+
+            # =========================
+            # RESTO CADENAS
+            # =========================
             Liverpool = procesar(dfs["Liverpool"], "Artículo", "Centro", "Día/Periodo", "Ventas Unidades", "LIVERPOOL")
             Sears = procesar(dfs["Sears"], "SKU", "TDA", "FECHA", "CANT", "SEARS")
             Suburbia = procesar(dfs["Suburbia"], "SKU", "CENTRO", "Día", "VENTA UNIDADES", "SUBURBIA")
@@ -172,23 +208,32 @@ elif opcion == "Consolidador Retail":
             Clik = procesar(dfs["Clik"], "SAP", "ID SUC", "FECHA", "Cantidad", "CLIKSTORE")
             Cklass = procesar(dfs["Cklass"], "Material", "ID", "Fecha", "Cantidad", "CKLASS")
 
-            # ECOMMERCE especial
+            # =========================
+            # ECOMMERCE (ESPECIAL)
+            # =========================
             E = dfs["Ecomm"]
+
             E['CANAL'] = "ECOMMERCE"
             E['Unido'] = norm(E['Unido'])
-            E['N° ARTICULO'] = E['Unido'].map(map_item)
             E['SKU'] = E['Unido']
+            E['N° ARTICULO'] = E['SKU'].map(map_item)
+
             E['FECHA'] = pd.to_datetime(E['Fecha'], errors='coerce')
             E['QTY'] = pd.to_numeric(E['Cant'], errors='coerce')
+
             E['ID'] = "1"
             E['STORE'] = "ECOMMERCE"
             E['ID RETAIL'] = "ECOMMERCE"
+
             E = E[['CANAL','FECHA','SKU','QTY','N° ARTICULO','ID','STORE','ID RETAIL']]
 
             # =========================
-            # CONSOLIDADO BASE
+            # CONSOLIDADO
             # =========================
-            df = pd.concat([Coppel,Liverpool,Sears,Suburbia,Mavi,Bodesa,Clik,Cklass,E], ignore_index=True)
+            df = pd.concat([
+                Coppel, Liverpool, Sears, Suburbia,
+                Mavi, Bodesa, Clik, Cklass, E
+            ], ignore_index=True)
 
             # =========================
             # COLUMNAS EXTRA
@@ -210,10 +255,14 @@ elif opcion == "Consolidador Retail":
             # MODELOS
             # =========================
             CAT_MOD['NÚMERO DE ARTÍCULO (SAP)'] = norm(CAT_MOD['NÚMERO DE ARTÍCULO (SAP)'])
+
             map_mod = CAT_MOD.drop_duplicates('NÚMERO DE ARTÍCULO (SAP)').set_index('NÚMERO DE ARTÍCULO (SAP)')
 
-            df['CC'] = map_mod['CILINDRADA'].astype(str) + "CC"
-            df['CC'] = df['N° ARTICULO'].map(df['CC'])
+            df['N° ARTICULO'] = norm(df['N° ARTICULO'])
+
+            df['CC'] = df['N° ARTICULO'].map(
+                (map_mod['CILINDRADA'].fillna(0).astype(int).astype(str) + "CC")
+            )
 
             df['MODELO'] = df['N° ARTICULO'].map(map_mod['MKT NAME'])
             df['AÑO MODELO'] = df['N° ARTICULO'].map(map_mod['AÑO']).astype("Int64")
@@ -232,7 +281,7 @@ elif opcion == "Consolidador Retail":
             df['ID STORE'] = df['ID'].astype(str) + "-" + df['STORE'].astype(str)
 
             # =========================
-            # ORDEN FINAL
+            # ORDEN FINAL (TU ESTRUCTURA)
             # =========================
             columnas_finales = [
                 "CANAL","SELL","FECHA","COD TIPO","TIPO","SKU","DESCRIPCION",
@@ -243,11 +292,11 @@ elif opcion == "Consolidador Retail":
 
             df = df[columnas_finales]
 
-            st.success("✅ CONSOLIDADO COMPLETO (FULL)")
+            st.success("✅ CONSOLIDADOR COMPLETO FUNCIONANDO")
             st.dataframe(df.head(20))
 
             st.download_button(
-                "📥 Descargar completo",
+                "📥 Descargar Consolidado",
                 to_excel(df),
-                "SO_RETAIL_FULL.xlsx"
+                "SO_RETAIL_FINAL.xlsx"
             )
