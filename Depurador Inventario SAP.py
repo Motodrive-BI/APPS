@@ -114,189 +114,151 @@ elif opcion == "Reporte de Sell Out Global":
 # =========================
 elif opcion == "Consolidador Retail":
 
-    st.title("🔗 Consolidador Retail COMPLETO")
+    st.title("🔗 Consolidador Sell Out Retail")
+    file_master = st.file_uploader("Sube Layout Retail Master.xlsx", type=["xlsx"])
 
-    archivo = st.file_uploader("Sube Layout Retail Master", type=["xlsx"])
+    if file_master and cat_sku_raw and cat_mod_raw and cat_suc_raw:
 
-    if archivo and cat_sku_raw and cat_mod_raw and cat_suc_raw:
+        if st.button("🚀 Ejecutar Consolidación"):
 
-        if st.button("Procesar"):
+            with st.spinner("Procesando..."):
 
-            # =========================
-            # FUNCIONES
-            # =========================
-            def limpiar(df):
-                df.columns = df.columns.str.strip()
-                return df
-
-            def norm(x):
-                return x.astype(str).str.strip().str.upper()
-
-            # =========================
-            # CARGA
-            # =========================
-            hojas = ["Coppel","Liverpool","Sears","Suburbia","Mavi","Bodesa","Clik","Cklass","Ecomm"]
-            dfs = {h: limpiar(pd.read_excel(archivo, sheet_name=h)) for h in hojas}
-
-            CAT_SKU = limpiar(pd.read_excel(cat_sku_raw, sheet_name="Sku_retail"))
-            CAT_MOD = limpiar(pd.read_excel(cat_mod_raw, sheet_name="CAT_MOD_v3"))
-            SUC = limpiar(pd.read_excel(cat_suc_raw, sheet_name="Sucursales RC"))
-
-            # =========================
-            # MAPAS BASE
-            # =========================
-            CAT_SKU['SKU'] = norm(CAT_SKU['SKU'])
-            map_item = CAT_SKU.drop_duplicates('SKU').set_index('SKU')['Item']
-
-            SUC['IDRETAIL'] = norm(SUC['ID Sucursal']) + norm(SUC['Cadena'])
-            map_suc = SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')
-
-            # =========================
-            # FUNCION GENERAL
-            # =========================
-            def procesar(df, sku_col, id_col, fecha_col, qty_col, canal, transformar_qty=None):
-
-                df['CANAL'] = canal
-                df[sku_col] = norm(df[sku_col])
-                df['SKU'] = df[sku_col]
-                df['N° ARTICULO'] = df['SKU'].map(map_item)
-
-                df['ID'] = norm(df[id_col])
-                df['ID RETAIL'] = df['ID'] + canal
-                df['STORE'] = df['ID RETAIL'].map(map_suc['Sucursal'])
-
-                df['FECHA'] = pd.to_datetime(df[fecha_col], errors='coerce')
-
-                # 🔥 FIX CANTIDAD
-                if transformar_qty:
-                    df['QTY'] = transformar_qty(df)
-                else:
-                    df['QTY'] = pd.to_numeric(df[qty_col], errors='coerce')
-
-                return df[['CANAL','FECHA','SKU','QTY','N° ARTICULO','ID','STORE','ID RETAIL']]
-
-            # =========================
-            # COPPEL (ESPECIAL)
-            # =========================
-            def qty_coppel(df):
-                mapa = {
-                    'VENTA': 1,
-                    'CANCELADA': 0,
-                    'ACTIVADA': 1,
-                    'EN TIENDA': 1
+                # =========================
+                # 📥 CARGA DE ARCHIVOS
+                # =========================
+                dfs = {
+                    "Coppel": pd.read_excel(file_master, sheet_name="Coppel"),
+                    "Liverpool": pd.read_excel(file_master, sheet_name="Liverpool"),
+                    "Sears": pd.read_excel(file_master, sheet_name="Sears"),
+                    "Suburbia": pd.read_excel(file_master, sheet_name="Suburbia"),
+                    "Mavi": pd.read_excel(file_master, sheet_name="Mavi"),
+                    "Bodesa": pd.read_excel(file_master, sheet_name="Bodesa"),
+                    "Clikstore": pd.read_excel(file_master, sheet_name="Clik"),
+                    "Cklass": pd.read_excel(file_master, sheet_name="Cklass"),
+                    "Ecomm": pd.read_excel(file_master, sheet_name="Ecomm"),
                 }
-                return df['Estatus'].astype(str).str.upper().map(mapa)
 
-            Coppel = procesar(
-                dfs["Coppel"],
-                "Código",
-                "Tienda",
-                "Fecha Venta",
-                None,
-                "COPPEL",
-                transformar_qty=qty_coppel
-            )
+                CAT_SKU = pd.read_excel(cat_sku_raw, sheet_name="Sku_retail")
+                CAT_MOD = pd.read_excel(cat_mod_raw, sheet_name="CAT_MOD_v3")
+                CAT_SUC = pd.read_excel(cat_suc_raw, sheet_name="Sucursales RC")
 
-            # =========================
-            # RESTO CADENAS
-            # =========================
-            Liverpool = procesar(dfs["Liverpool"], "Artículo", "Centro", "Día/Periodo", "Ventas Unidades", "LIVERPOOL")
-            Sears = procesar(dfs["Sears"], "SKU", "TDA", "FECHA", "CANT", "SEARS")
-            Suburbia = procesar(dfs["Suburbia"], "SKU", "CENTRO", "Día", "VENTA UNIDADES", "SUBURBIA")
-            Mavi = procesar(dfs["Mavi"], "CODIGO", "TIENDA", "FECHA FACT", "CANT.", "MAVI")
-            Bodesa = procesar(dfs["Bodesa"], "Materia", "Centro", "Fecha Vta", "Vta pzas", "BODESA")
-            Clik = procesar(dfs["Clik"], "SAP", "ID SUC", "FECHA", "Cantidad", "CLIKSTORE")
-            Cklass = procesar(dfs["Cklass"], "Material", "ID", "Fecha", "Cantidad", "CKLASS")
+                # =========================
+                # 🧠 MAPEOS
+                # =========================
+                CAT_SKU['SKU'] = CAT_SKU['SKU'].astype(str).str.strip().str.upper()
+                mapeo_sku = CAT_SKU.drop_duplicates('SKU').set_index('SKU')['Item']
 
-            # =========================
-            # ECOMMERCE (ESPECIAL)
-            # =========================
-            E = dfs["Ecomm"]
+                CAT_SUC['IDRETAIL'] = (
+                    CAT_SUC['ID Sucursal'].astype(str).str.strip() +
+                    CAT_SUC['Cadena'].astype(str).str.strip()
+                ).str.upper()
 
-            E['CANAL'] = "ECOMMERCE"
-            E['Unido'] = norm(E['Unido'])
-            E['SKU'] = E['Unido']
-            E['N° ARTICULO'] = E['SKU'].map(map_item)
+                mapeo_suc = CAT_SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')['Sucursal']
+                mapeo_estado = CAT_SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')['Estado']
+                mapeo_ciudad = CAT_SUC.drop_duplicates('IDRETAIL').set_index('IDRETAIL')['Municipio']
 
-            E['FECHA'] = pd.to_datetime(E['Fecha'], errors='coerce')
-            E['QTY'] = pd.to_numeric(E['Cant'], errors='coerce')
+                # =========================
+                # 🔧 FUNCIÓN GENERAL
+                # =========================
+                def procesar(df, sku_col, tienda_col, fecha_col, qty_col, canal):
 
-            E['ID'] = "1"
-            E['STORE'] = "ECOMMERCE"
-            E['ID RETAIL'] = "ECOMMERCE"
+                    df = df.copy()
 
-            E = E[['CANAL','FECHA','SKU','QTY','N° ARTICULO','ID','STORE','ID RETAIL']]
+                    # limpiar columnas
+                    df[sku_col] = df[sku_col].astype(str).str.strip().str.upper()
+                    df[tienda_col] = df[tienda_col].astype(str).str.strip()
 
-            # =========================
-            # CONSOLIDADO
-            # =========================
-            df = pd.concat([
-                Coppel, Liverpool, Sears, Suburbia,
-                Mavi, Bodesa, Clik, Cklass, E
-            ], ignore_index=True)
+                    # eliminar basura tipo "resultado"
+                    df = df[~df[sku_col].str.contains("RESULT", case=False, na=False)]
 
-            # =========================
-            # COLUMNAS EXTRA
-            # =========================
-            df['SELL'] = "SO"
-            df['TIPO'] = ""
-            df['COD TIPO'] = ""
-            df['DESCRIPCION'] = "RE"
-            df['MONTO'] = ""
+                    # fechas
+                    df[fecha_col] = pd.to_datetime(df[fecha_col], errors='coerce')
 
-            # =========================
-            # FECHAS
-            # =========================
-            df['MES'] = df['FECHA'].dt.month_name()
-            df['AÑO'] = df['FECHA'].dt.year.astype("Int64")
-            df['MES - AÑO'] = df['MES'] + " " + df['AÑO'].astype(str)
+                    # qty
+                    df['QTY'] = pd.to_numeric(df.get(qty_col, 1), errors='coerce')
 
-            # =========================
-            # MODELOS
-            # =========================
-            CAT_MOD['NÚMERO DE ARTÍCULO (SAP)'] = norm(CAT_MOD['NÚMERO DE ARTÍCULO (SAP)'])
+                    # map SKU
+                    df['N° ARTICULO'] = df[sku_col].map(mapeo_sku)
 
-            map_mod = CAT_MOD.drop_duplicates('NÚMERO DE ARTÍCULO (SAP)').set_index('NÚMERO DE ARTÍCULO (SAP)')
+                    # ID RETAIL
+                    df['ID'] = df[tienda_col]
+                    df['CANAL'] = canal
+                    df['ID RETAIL'] = df['ID'].astype(str) + canal
 
-            df['N° ARTICULO'] = norm(df['N° ARTICULO'])
+                    # sucursal
+                    df['STORE'] = df['ID RETAIL'].map(mapeo_suc)
 
-            df['CC'] = df['N° ARTICULO'].map(
-                (map_mod['CILINDRADA'].fillna(0).astype(int).astype(str) + "CC")
-            )
+                    # limpiar NaN críticos
+                    df = df.dropna(subset=['N° ARTICULO'])
 
-            df['MODELO'] = df['N° ARTICULO'].map(map_mod['MKT NAME'])
-            df['AÑO MODELO'] = df['N° ARTICULO'].map(map_mod['AÑO']).astype("Int64")
-            df['COLOR'] = df['N° ARTICULO'].map(map_mod['COLOR'])
-            df['MOD COLOR'] = df['MODELO'] + " " + df['COLOR']
+                    return df.reset_index(drop=True)
 
-            # =========================
-            # GEOGRAFÍA
-            # =========================
-            df['STATE'] = df['ID RETAIL'].map(map_suc['Estado'])
-            df['CITY'] = df['ID RETAIL'].map(map_suc['Municipio'])
+                # =========================
+                # 🚀 PROCESAMIENTO
+                # =========================
+                Coppel = procesar(dfs["Coppel"], "Código", "Tienda", "Fecha Venta", "QTY", "COPPEL")
+                Liverpool = procesar(dfs["Liverpool"], "Artículo", "Centro", "Día/Periodo", "Ventas Unidades", "LIVERPOOL")
+                Sears = procesar(dfs["Sears"], "SKU", "TDA", "FECHA", "CANT", "SEARS")
+                Suburbia = procesar(dfs["Suburbia"], "SKU", "CENTRO", "Día", "VENTA UNIDADES", "SUBURBIA")
+                Mavi = procesar(dfs["Mavi"], "CODIGO", "TIENDA", "FECHA FACT", "CANT.", "MAVI")
+                Bodesa = procesar(dfs["Bodesa"], "Materia", "Centro", "Fecha Vta", "Vta pzas", "BODESA")
+                Clikstore = procesar(dfs["Clikstore"], "SAP", "ID SUC", "FECHA", "Cantidad", "CLIKSTORE")
+                Cklass = procesar(dfs["Cklass"], "Material", "ID", "Fecha", "Cantidad", "CKLASS")
+                Ecomm = procesar(dfs["Ecomm"], "Unido", "Id", "Fecha  ", "Cant", "ECOMM")
 
-            # =========================
-            # ID STORE
-            # =========================
-            df['ID STORE'] = df['ID'].astype(str) + "-" + df['STORE'].astype(str)
+                # =========================
+                # 🧩 CONSOLIDADO
+                # =========================
+                frames = [Coppel, Liverpool, Sears, Suburbia, Mavi, Bodesa, Clikstore, Cklass, Ecomm]
+                df_final = pd.concat(frames, ignore_index=True)
 
-            # =========================
-            # ORDEN FINAL (TU ESTRUCTURA)
-            # =========================
-            columnas_finales = [
-                "CANAL","SELL","FECHA","COD TIPO","TIPO","SKU","DESCRIPCION",
-                "QTY","MONTO","N° ARTICULO","CC","ID","STORE",
-                "MES","MES - AÑO","AÑO","MODELO","AÑO MODELO","COLOR",
-                "MOD COLOR","ID RETAIL","STATE","CITY","ID STORE"
-            ]
+                # =========================
+                # 📅 FECHAS
+                # =========================
+                df_final['FECHA'] = pd.to_datetime(df_final['FECHA'], errors='coerce')
+                df_final['MES'] = df_final['FECHA'].dt.month_name()
+                df_final['AÑO'] = df_final['FECHA'].dt.year
+                df_final['MES - AÑO'] = df_final['MES'] + " " + df_final['AÑO'].astype(str)
 
-            df = df[columnas_finales]
+                # =========================
+                # 🧠 MODELOS
+                # =========================
+                CAT_MOD['NÚMERO DE ARTÍCULO (SAP)'] = CAT_MOD['NÚMERO DE ARTÍCULO (SAP)'].astype(str).str.strip().str.upper()
+                CAT_MOD['CILINDRADA'] = CAT_MOD['CILINDRADA'].fillna(0).astype(int).astype(str) + "CC"
 
-            st.success("✅ CONSOLIDADOR COMPLETO FUNCIONANDO")
-            st.dataframe(df.head(20))
+                map_mod = CAT_MOD.drop_duplicates('NÚMERO DE ARTÍCULO (SAP)').set_index('NÚMERO DE ARTÍCULO (SAP)')
 
-            st.download_button(
-                "📥 Descargar Consolidado",
-                to_excel(df),
-                "SO_RETAIL_FINAL.xlsx"
-            )
+                df_final['CC'] = df_final['N° ARTICULO'].map(map_mod['CILINDRADA'])
+                df_final['MODELO'] = df_final['N° ARTICULO'].map(map_mod['MKT NAME'])
+                df_final['AÑO MODELO'] = df_final['N° ARTICULO'].map(map_mod['AÑO']).astype('Int64')
+                df_final['COLOR'] = df_final['N° ARTICULO'].map(map_mod['COLOR'])
+                df_final['MOD COLOR'] = df_final['MODELO'] + " " + df_final['COLOR']
+
+                # =========================
+                # 🌎 GEOGRAFÍA
+                # =========================
+                df_final['STATE'] = df_final['ID RETAIL'].map(mapeo_estado)
+                df_final['CITY'] = df_final['ID RETAIL'].map(mapeo_ciudad)
+
+                # =========================
+                # 🆔 ID STORE
+                # =========================
+                df_final['ID STORE'] = df_final['ID'].astype(str) + "-" + df_final['STORE'].astype(str)
+
+                # =========================
+                # 🧹 LIMPIEZA FINAL
+                # =========================
+                df_final = df_final.dropna(subset=['N° ARTICULO'])
+                df_final = df_final.reset_index(drop=True)
+
+                # =========================
+                # 📊 OUTPUT
+                # =========================
+                st.success("✅ Consolidación completa sin errores")
+                st.dataframe(df_final.head(20))
+
+                st.download_button(
+                    "📥 Descargar Consolidado",
+                    to_excel(df_final),
+                    "SO_CONSOLIDADO_FINAL.xlsx"
+                )
