@@ -68,7 +68,9 @@ if opcion == "Reporte Diario de Inventarios":
     archivo = st.file_uploader("Cargar archivo", type=["xlsx", "xls"])
 
     if archivo:
-        df = pd.read_excel(archivo, header=None)
+        # Determinamos el motor según la extensión
+        motor = "xlrd" if archivo.name.endswith(".xls") else "openpyxl"
+        df = pd.read_excel(archivo, header=None, engine=motor)
 
         df['ALM'] = None
         current_alm = None
@@ -101,7 +103,8 @@ elif opcion == "Reporte de Sell Out Global":
     archivo = st.file_uploader("Cargar archivo", type=["xlsx", "xls"])
 
     if archivo:
-        df = pd.read_excel(archivo)
+        motor = "xlrd" if archivo.name.endswith(".xls") else "openpyxl"
+        df = pd.read_excel(archivo, engine=motor)
         df = limpiar_columnas(df)
 
         df['Código Postal'] = df['Código Postal'].astype(str)
