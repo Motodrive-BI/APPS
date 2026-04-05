@@ -381,7 +381,7 @@ elif opcion == "Consolidador Retail":
                 )
                 serie_cc    = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'CILINDRADA',  case='upper')
                 serie_mkt   = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'MKT NAME',    case='upper')
-                serie_anio  = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'AÑO MODEL',   case='upper')
+                serie_anio  = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'AÑO',   case='upper')
                 serie_color = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'COLOR MODEL', case='upper')
 
                 art_upper = Sell_Out_Retail['N° ARTICULO'].astype(str).str.strip().str.upper()
