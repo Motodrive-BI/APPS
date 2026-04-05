@@ -30,6 +30,17 @@ def limpiar_columnas(df):
     df.columns = df.columns.str.strip()
     return df
 
+def mapeo_seguro(cat_df, key_col, value_col, case='lower'):
+    """Crea una Serie de mapeo garantizando índice único."""
+    tmp = cat_df.copy()
+    tmp[key_col] = tmp[key_col].astype(str).str.strip()
+    if case == 'lower':
+        tmp[key_col] = tmp[key_col].str.lower()
+    elif case == 'upper':
+        tmp[key_col] = tmp[key_col].str.upper()
+    tmp = tmp[~tmp[key_col].duplicated(keep='first')]
+    return tmp.set_index(key_col)[value_col]
+
 def to_excel(df):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
@@ -125,297 +136,171 @@ elif opcion == "Consolidador Retail":
                 # =========================
                 # 📥 CARGA
                 # =========================
-                Coppel = pd.read_excel(file_master, sheet_name="Coppel")
+                Coppel    = pd.read_excel(file_master, sheet_name="Coppel")
                 Liverpool = pd.read_excel(file_master, sheet_name="Liverpool")
-                Sears = pd.read_excel(file_master, sheet_name="Sears")
-                Suburbia = pd.read_excel(file_master, sheet_name="Suburbia")
-                Mavi = pd.read_excel(file_master, sheet_name="Mavi")
-                Bodesa = pd.read_excel(file_master, sheet_name="Bodesa")
+                Sears     = pd.read_excel(file_master, sheet_name="Sears")
+                Suburbia  = pd.read_excel(file_master, sheet_name="Suburbia")
+                Mavi      = pd.read_excel(file_master, sheet_name="Mavi")
+                Bodesa    = pd.read_excel(file_master, sheet_name="Bodesa")
                 Clikstore = pd.read_excel(file_master, sheet_name="Clik")
-                Cklass = pd.read_excel(file_master, sheet_name="Cklass")
-                Ecomm = pd.read_excel(file_master, sheet_name="Ecomm")
+                Cklass    = pd.read_excel(file_master, sheet_name="Cklass")
+                Ecomm     = pd.read_excel(file_master, sheet_name="Ecomm")
 
                 # =========================
                 # 📚 CATÁLOGOS
                 # =========================
-                CAT_SKU = pd.read_excel(cat_sku_raw, sheet_name="Sku_retail")
-                CATALOGO_MODELO = pd.read_excel(cat_mod_raw, sheet_name="CAT_MOD_v3")
+                CAT_SKU             = pd.read_excel(cat_sku_raw, sheet_name="Sku_retail")
+                CATALOGO_MODELO     = pd.read_excel(cat_mod_raw, sheet_name="CAT_MOD_v3")
                 CATALOGO_SUCURSALES = pd.read_excel(cat_suc_raw, sheet_name="Sucursales RC")
+
+                # Series maestras SKU -> Item
+                serie_sku_item_lower = mapeo_seguro(CAT_SKU, 'SKU', 'Item', case='lower')
+                serie_sku_item_upper = mapeo_seguro(CAT_SKU, 'SKU', 'Item', case='upper')
+
+                # Helper: serie IDRETAIL -> campo desde CATALOGO_SUCURSALES
+                def serie_suc(campo):
+                    tmp = CATALOGO_SUCURSALES.copy()
+                    tmp['IDRETAIL'] = (
+                        tmp['ID Sucursal'].astype(str).str.strip() +
+                        tmp['Cadena'].astype(str).str.strip()
+                    )
+                    return mapeo_seguro(tmp, 'IDRETAIL', campo, case='upper')
+
+                # Helper: serie ID RETAIL (concatenacion distinta usada por Mavi/Bodesa/Clikstore/Cklass)
+                def serie_suc_idretail(campo):
+                    tmp = CATALOGO_SUCURSALES.copy()
+                    tmp['ID Sucursal'] = tmp['ID Sucursal'].astype('str')
+                    tmp['ID RETAIL'] = tmp['ID Sucursal'] + tmp['Cadena']
+                    return mapeo_seguro(tmp, 'ID RETAIL', campo, case='upper')
 
                 # =========================
                 # 🔥 Coppel
                 # =========================
-                Coppel['Cadena'] = "COPPEL"
+                Coppel['Cadena']  = "COPPEL"
+                Coppel['Código']  = Coppel['Código'].astype('str').str.strip().str.upper()
+                Coppel['Item Number'] = Coppel['Código'].str.lower().map(serie_sku_item_lower)
 
-                Coppel['Código'] = Coppel['Código'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.lower()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Coppel['Item Number'] = Coppel['Código'].map(mapeo_series)
-
-                CATALOGO_SUCURSALES['IDRETAIL'] = (
-                    CATALOGO_SUCURSALES['ID Sucursal'].astype(str).str.strip() +
-                    CATALOGO_SUCURSALES['Cadena'].astype(str).str.strip()
-                )
                 Coppel['Id Retail'] = Coppel['Tienda'].astype('str') + "COPPEL"
-                Coppel['Tienda'] = Coppel['Tienda'].astype('str').str.strip().str.upper()
+                Coppel['Tienda']    = Coppel['Tienda'].astype('str').str.strip().str.upper()
+                Coppel['SUCURSAL']  = Coppel['Id Retail'].str.upper().map(serie_suc('Sucursal'))
 
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['IDRETAIL'], keep='first')
-                mapeo_items['IDRETAIL'] = mapeo_items['IDRETAIL'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('IDRETAIL')['Sucursal']
-
-                Coppel['SUCURSAL'] = Coppel['Id Retail'].map(mapeo_series)
-
-                Estatus_Cantidad = {'Venta': 1, 'Cancelada': 0, 'En tienda': 1, 'Activada': 1}
-                Estatus_Cantidad = pd.DataFrame(list(Estatus_Cantidad.items()), columns=['estatus', 'Cantidad'])
-
+                Estatus_Cantidad = pd.DataFrame(
+                    [('VENTA', 1), ('CANCELADA', 0), ('EN TIENDA', 1), ('ACTIVADA', 1)],
+                    columns=['estatus', 'Cantidad']
+                )
                 Coppel['Estatus'] = Coppel['Estatus'].str.upper()
-                mapeo_items = Estatus_Cantidad.drop_duplicates(subset=['estatus'], keep='first')
-                mapeo_items['estatus'] = mapeo_items['estatus'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('estatus')['Cantidad']
-
-                Coppel['QTY'] = Coppel['Estatus'].map(mapeo_series)
-
-                CODIGO_TIPO = {'FÍSICO': '10', 'VIRTUAL': '30'}
-                CODIGO_TIPO = pd.DataFrame(list(CODIGO_TIPO.items()), columns=['Tipo', 'CODIGO'])
-
-                Coppel['Estatus'] = Coppel['Estatus'].str.upper()
-                mapeo_items = Estatus_Cantidad.drop_duplicates(subset=['estatus'], keep='first')
-                mapeo_items['estatus'] = mapeo_items['estatus'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('estatus')['Cantidad']
-
-                Coppel['COD TIPO'] = Coppel['Estatus'].map(mapeo_series)
+                mapeo_qty = mapeo_seguro(Estatus_Cantidad, 'estatus', 'Cantidad', case='upper')
+                Coppel['QTY']      = Coppel['Estatus'].map(mapeo_qty)
+                Coppel['COD TIPO'] = Coppel['Estatus'].map(mapeo_qty)
                 Coppel['Fecha Venta'] = pd.to_datetime(Coppel['Fecha Venta'])
 
                 # =========================
-                # RETAIL CHAINS
-                # =========================
-
                 # Liverpool
+                # =========================
                 Liverpool['Canal'] = 'LIVERPOOL'
                 Liverpool = Liverpool[Liverpool['Centro'] != 'Resultado total']
-                Liverpool['Centro'] = Liverpool['Centro'].astype(int)
-
-                # Suburbia
-                Suburbia['Canal'] = 'SUBURBIA'
-                Suburbia['CENTRO'] = Suburbia['CENTRO'].astype(int)
-
-                # Sears
-                Sears['Canal'] = 'SEARS'
-                Sears['Tipo'] = 'Físico'
-                Sears['TDA'] = Sears['TDA'].astype(str)
-
-                # LIVERPOOL
-                Liverpool['Centro'] = Liverpool['Centro'].astype(str)
-                Liverpool['Artículo'] = Liverpool['Artículo'].astype(str)
-
+                Liverpool['Centro']      = Liverpool['Centro'].astype(int).astype(str)
+                Liverpool['Artículo']    = Liverpool['Artículo'].astype(str)
                 Liverpool = Liverpool[~Liverpool['Artículo'].str.contains('Resultado', case=False, na=False)]
                 Liverpool['Día/Periodo'] = pd.to_datetime(Liverpool['Día/Periodo'], errors='coerce')
                 Liverpool = Liverpool[Liverpool['Día/Periodo'].notna()]
                 Liverpool = Liverpool.dropna(subset=['Artículo'])
 
-                Liverpool['Artículo'] = Liverpool['Artículo'].astype('str').str.strip().str.lower()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.lower()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Liverpool['Item Number'] = Liverpool['Artículo'].map(mapeo_series)
-                Liverpool['IDRETAIL'] = Liverpool['Centro'].astype(str) + "LIVERPOOL"
-
-                CATALOGO_SUCURSALES['IDRETAIL'] = (
-                    CATALOGO_SUCURSALES['ID Sucursal'].astype(str).str.strip() +
-                    CATALOGO_SUCURSALES['Cadena'].astype(str).str.strip()
-                )
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['IDRETAIL'], keep='first')
-                mapeo_items['IDRETAIL'] = mapeo_items['IDRETAIL'].astype(str).str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('IDRETAIL')['Sucursal']
-
-                Liverpool['SUCURSAL'] = Liverpool['IDRETAIL'].map(mapeo_series)
-
-                # SUBURBIA
-                Suburbia['SKU'] = Suburbia['SKU'].astype('str').str.strip().str.lower()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.lower()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Suburbia['Item Number'] = Suburbia['SKU'].map(mapeo_series)
-                Suburbia['IDRETAIL'] = Suburbia['CENTRO'].astype(str) + "SUBURBIA"
-
-                CATALOGO_SUCURSALES['IDRETAIL'] = (
-                    CATALOGO_SUCURSALES['ID Sucursal'].astype(str).str.strip() +
-                    CATALOGO_SUCURSALES['Cadena'].astype(str).str.strip()
-                )
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['IDRETAIL'], keep='first')
-                mapeo_items['IDRETAIL'] = mapeo_items['IDRETAIL'].astype(str).str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('IDRETAIL')['Sucursal']
-
-                Suburbia['SUCURSAL'] = Suburbia['IDRETAIL'].map(mapeo_series)
-
-                # SEARS
-                Sears['SKU'] = Sears['SKU'].astype('str').str.strip().str.lower()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.lower()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Sears['Item Number'] = Sears['SKU'].map(mapeo_series)
-                Sears['IDRETAIL'] = Sears['TDA'].astype(str) + "SEARS"
-
-                CATALOGO_SUCURSALES['IDRETAIL'] = (
-                    CATALOGO_SUCURSALES['ID Sucursal'].astype(str).str.strip() +
-                    CATALOGO_SUCURSALES['Cadena'].astype(str).str.strip()
-                )
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['IDRETAIL'], keep='first')
-                mapeo_items['IDRETAIL'] = mapeo_items['IDRETAIL'].astype(str).str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('IDRETAIL')['Sucursal']
-
-                Sears['SUCURSAL'] = Sears['IDRETAIL'].map(mapeo_series)
-                Sears['FECHA'] = pd.to_datetime(Sears['FECHA'].str.replace('-', '/'), format='%m/%d/%Y', errors='coerce')
+                Liverpool['Artículo']    = Liverpool['Artículo'].str.strip().str.lower()
+                Liverpool['Item Number'] = Liverpool['Artículo'].map(serie_sku_item_lower)
+                Liverpool['IDRETAIL']    = Liverpool['Centro'].astype(str) + "LIVERPOOL"
+                Liverpool['SUCURSAL']    = Liverpool['IDRETAIL'].str.upper().map(serie_suc('Sucursal'))
 
                 # =========================
-                # CADENAS ALICIA RETAIL
+                # Suburbia
                 # =========================
+                Suburbia['Canal']  = 'SUBURBIA'
+                Suburbia['CENTRO'] = Suburbia['CENTRO'].astype(int)
+                Suburbia['SKU']    = Suburbia['SKU'].astype('str').str.strip().str.lower()
+                Suburbia['Item Number'] = Suburbia['SKU'].map(serie_sku_item_lower)
+                Suburbia['IDRETAIL']    = Suburbia['CENTRO'].astype(str) + "SUBURBIA"
+                Suburbia['SUCURSAL']    = Suburbia['IDRETAIL'].str.upper().map(serie_suc('Sucursal'))
 
+                # =========================
+                # Sears
+                # =========================
+                Sears['Canal'] = 'SEARS'
+                Sears['Tipo']  = 'Físico'
+                Sears['TDA']   = Sears['TDA'].astype(str)
+                Sears['SKU']   = Sears['SKU'].astype('str').str.strip().str.lower()
+                Sears['Item Number'] = Sears['SKU'].map(serie_sku_item_lower)
+                Sears['IDRETAIL']    = Sears['TDA'].astype(str) + "SEARS"
+                Sears['SUCURSAL']    = Sears['IDRETAIL'].str.upper().map(serie_suc('Sucursal'))
+                Sears['FECHA']       = pd.to_datetime(
+                    Sears['FECHA'].astype(str).str.replace('-', '/'),
+                    format='%m/%d/%Y', errors='coerce'
+                )
+
+                # =========================
                 # Mavi
-                Mavi['CADENA'] = "MAVI"
+                # =========================
+                Mavi['CADENA']      = "MAVI"
                 Mavi['Item Number'] = ""
-                Mavi['Item Number'] = Mavi['Item Number'].astype(str)
+                Mavi['CODIGO']      = Mavi['CODIGO'].astype('str').str.strip().str.upper()
+                Mavi['Item Number'] = Mavi['CODIGO'].map(serie_sku_item_upper)
+                Mavi['IDRETAIL']    = Mavi['TIENDA'].astype('str') + "MAVI"
+                Mavi['SUCURSAL']    = ""
+                Mavi['IDRETAIL']    = Mavi['IDRETAIL'].astype('str').str.strip().str.upper()
+                Mavi['SUCURSAL']    = Mavi['IDRETAIL'].map(serie_suc_idretail('Sucursal'))
 
-                Mavi['CODIGO'] = Mavi['CODIGO'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Mavi['Item Number'] = Mavi['CODIGO'].map(mapeo_series)
-
-                Mavi['IDRETAIL'] = Mavi['TIENDA'].astype('Int64')
-                Mavi['IDRETAIL'] = Mavi['TIENDA'].astype('str') + "MAVI"
-                Mavi['SUCURSAL'] = ""
-                Mavi['SUCURSAL'] = Mavi['SUCURSAL'].astype(str)
-
-                CATALOGO_SUCURSALES['ID Sucursal'] = CATALOGO_SUCURSALES['ID Sucursal'].astype('str')
-                CATALOGO_SUCURSALES['ID RETAIL'] = CATALOGO_SUCURSALES['ID Sucursal'] + CATALOGO_SUCURSALES['Cadena']
-
-                Mavi['IDRETAIL'] = Mavi['IDRETAIL'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['ID RETAIL'], keep='first')
-                mapeo_items['ID RETAIL'] = mapeo_items['ID RETAIL'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('ID RETAIL')['Sucursal']
-
-                Mavi['SUCURSAL'] = Mavi['IDRETAIL'].map(mapeo_series)
-
+                # =========================
                 # Bodesa
-                Bodesa['Cadena'] = "BODESA"
+                # =========================
+                Bodesa['Cadena']      = "BODESA"
                 Bodesa['Item Number'] = ""
-                Bodesa['Item Number'] = Bodesa['Item Number'].astype(str)
+                Bodesa['Materia']     = Bodesa['Materia'].astype('str').str.strip().str.upper()
+                Bodesa['Item Number'] = Bodesa['Materia'].map(serie_sku_item_upper)
+                Bodesa['IDRETAIL']    = Bodesa['Centro'].astype('str') + "BODESA"
+                Bodesa['SUCURSAL']    = ""
+                Bodesa['IDRETAIL']    = Bodesa['IDRETAIL'].astype('str').str.strip().str.upper()
+                Bodesa['SUCURSAL']    = Bodesa['IDRETAIL'].map(serie_suc_idretail('Sucursal'))
+                Bodesa['Fecha Vta']   = pd.to_datetime(
+                    Bodesa['Fecha Vta'].astype(str).str.replace('-', '/'),
+                    format='%d/%m/%Y', errors='coerce'
+                )
 
-                Bodesa['Materia'] = Bodesa['Materia'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Bodesa['Item Number'] = Bodesa['Materia'].map(mapeo_series)
-
-                Bodesa['IDRETAIL'] = Bodesa['Centro'].astype('str') + "BODESA"
-                Bodesa['SUCURSAL'] = ""
-                Bodesa['SUCURSAL'] = Bodesa['SUCURSAL'].astype(str)
-
-                CATALOGO_SUCURSALES['ID Sucursal'] = CATALOGO_SUCURSALES['ID Sucursal'].astype('str')
-                CATALOGO_SUCURSALES['ID RETAIL'] = CATALOGO_SUCURSALES['ID Sucursal'] + CATALOGO_SUCURSALES['Cadena']
-
-                Bodesa['IDRETAIL'] = Bodesa['IDRETAIL'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['ID RETAIL'], keep='first')
-                mapeo_items['ID RETAIL'] = mapeo_items['ID RETAIL'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('ID RETAIL')['Sucursal']
-
-                Bodesa['SUCURSAL'] = Bodesa['IDRETAIL'].map(mapeo_series)
-                Bodesa['Fecha Vta'] = pd.to_datetime(Bodesa['Fecha Vta'].str.replace('-', '/'), format='%d/%m/%Y', errors='coerce')
-
+                # =========================
                 # Clikstore
-                Clikstore['Cadena'] = "CLIKSTORE"
+                # =========================
+                Clikstore['Cadena']      = "CLIKSTORE"
                 Clikstore['Item Number'] = ""
-                Clikstore['Item Number'] = Clikstore['Item Number'].astype(str)
+                Clikstore['SAP']         = Clikstore['SAP'].astype('str').str.strip().str.upper()
+                Clikstore['Item Number'] = Clikstore['SAP'].map(serie_sku_item_upper)
+                Clikstore['IDRETAIL']    = Clikstore['ID SUC'].astype('str') + "CLIKSTORE"
+                Clikstore['SUCURSAL']    = ""
+                Clikstore['IDRETAIL']    = Clikstore['IDRETAIL'].astype('str').str.strip().str.upper()
+                Clikstore['SUCURSAL']    = Clikstore['IDRETAIL'].map(serie_suc_idretail('Sucursal'))
 
-                Clikstore['SAP'] = Clikstore['SAP'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Clikstore['Item Number'] = Clikstore['SAP'].map(mapeo_series)
-
-                Clikstore['IDRETAIL'] = Clikstore['ID SUC'].astype('str') + "CLIKSTORE"
-                Clikstore['SUCURSAL'] = ""
-                Clikstore['SUCURSAL'] = Clikstore['SUCURSAL'].astype(str)
-
-                CATALOGO_SUCURSALES['ID Sucursal'] = CATALOGO_SUCURSALES['ID Sucursal'].astype('str')
-                CATALOGO_SUCURSALES['ID RETAIL'] = CATALOGO_SUCURSALES['ID Sucursal'] + CATALOGO_SUCURSALES['Cadena']
-
-                Clikstore['IDRETAIL'] = Clikstore['IDRETAIL'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['ID RETAIL'], keep='first')
-                mapeo_items['ID RETAIL'] = mapeo_items['ID RETAIL'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('ID RETAIL')['Sucursal']
-
-                Clikstore['SUCURSAL'] = Clikstore['IDRETAIL'].map(mapeo_series)
-
+                # =========================
                 # Cklass
-                Cklass['Cadena'] = "CKLASS"
+                # =========================
+                Cklass['Cadena']      = "CKLASS"
                 Cklass['Item Number'] = ""
-                Cklass['Item Number'] = Cklass['Item Number'].astype(str)
+                Cklass['Material']    = Cklass['Material'].astype('str').str.strip().str.upper()
+                Cklass['Item Number'] = Cklass['Material'].map(serie_sku_item_upper)
+                Cklass['IDRETAIL']    = Cklass['ID'].astype('str') + "CKLASS"
+                Cklass['SUCURSAL']    = ""
+                Cklass['IDRETAIL']    = Cklass['IDRETAIL'].astype('str').str.strip().str.upper()
+                Cklass['SUCURSAL']    = Cklass['IDRETAIL'].map(serie_suc_idretail('Sucursal'))
 
-                Cklass['Material'] = Cklass['Material'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Cklass['Item Number'] = Cklass['Material'].map(mapeo_series)
-
-                Cklass['IDRETAIL'] = Cklass['ID'].astype('str') + "CKLASS"
-                Cklass['SUCURSAL'] = ""
-                Cklass['SUCURSAL'] = Cklass['SUCURSAL'].astype(str)
-
-                CATALOGO_SUCURSALES['ID Sucursal'] = CATALOGO_SUCURSALES['ID Sucursal'].astype('str')
-                CATALOGO_SUCURSALES['ID RETAIL'] = CATALOGO_SUCURSALES['ID Sucursal'] + CATALOGO_SUCURSALES['Cadena']
-
-                Cklass['IDRETAIL'] = Cklass['IDRETAIL'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['ID RETAIL'], keep='first')
-                mapeo_items['ID RETAIL'] = mapeo_items['ID RETAIL'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('ID RETAIL')['Sucursal']
-
-                Cklass['SUCURSAL'] = Cklass['IDRETAIL'].map(mapeo_series)
-
-                # ECOMMERCE
-                Ecomm['Tienda'] = Ecomm['Tienda'].replace('WM', 'WALMART')
-                Ecomm['Tienda'] = Ecomm['Tienda'].replace('SAMS', 'SAM´S CLUB')
-                Ecomm['Tienda'] = Ecomm['Tienda'].replace('TL', 'TIENDA EN LINEA')
-                Ecomm['Tienda'] = Ecomm['Tienda'].replace('ML', 'MERCADO LIBRE')
-
+                # =========================
+                # Ecomm
+                # =========================
+                Ecomm['Tienda'] = Ecomm['Tienda'].replace({
+                    'WM': 'WALMART', 'SAMS': "SAM´S CLUB",
+                    'TL': 'TIENDA EN LINEA', 'ML': 'MERCADO LIBRE'
+                })
                 Ecomm['Item Number'] = ""
-                Ecomm['Item Number'] = Ecomm['Item Number'].astype(str)
-
-                Ecomm['Unido'] = Ecomm['Unido'].astype('str').str.strip().str.upper()
-
-                mapeo_items = CAT_SKU.drop_duplicates(subset=['SKU'], keep='first')
-                mapeo_items['SKU'] = mapeo_items['SKU'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('SKU')['Item']
-
-                Ecomm['Item Number'] = Ecomm['Unido'].map(mapeo_series)
-                Ecomm['Sucursal'] = "ECOMMERCE"
-                Ecomm['Id'] = 1
-                Ecomm['idStore'] = Ecomm['Id'].astype("str") + "-" + Ecomm['Sucursal']
+                Ecomm['Unido']       = Ecomm['Unido'].astype('str').str.strip().str.upper()
+                Ecomm['Item Number'] = Ecomm['Unido'].map(serie_sku_item_upper)
+                Ecomm['Sucursal']    = "ECOMMERCE"
+                Ecomm['Id']          = 1
+                Ecomm['idStore']     = Ecomm['Id'].astype("str") + "-" + Ecomm['Sucursal']
 
                 # =========================
                 # CONSOLIDADO SELL OUT RETAIL
@@ -430,84 +315,91 @@ elif opcion == "Consolidador Retail":
 
                 Sell_Out_Retail = pd.DataFrame(columns=column_names)
 
-                Sell_Out_Retail['CANAL'] = pd.concat([Coppel['Cadena'], Liverpool['Canal'], Sears['Canal'], Suburbia['Canal'], Mavi['CADENA'], Bodesa['Cadena'], Clikstore['Cadena'], Cklass['Cadena'], Ecomm['Tienda']], ignore_index=True)
+                Sell_Out_Retail['CANAL'] = pd.concat([
+                    Coppel['Cadena'], Liverpool['Canal'], Sears['Canal'], Suburbia['Canal'],
+                    Mavi['CADENA'], Bodesa['Cadena'], Clikstore['Cadena'], Cklass['Cadena'], Ecomm['Tienda']
+                ], ignore_index=True)
+
                 Sell_Out_Retail['SELL'] = "SO"
-                Sell_Out_Retail['FECHA'] = pd.concat([Coppel['Fecha Venta'], Liverpool['Día/Periodo'], Sears['FECHA'], Suburbia['Día'], Mavi['FECHA FACT'], Bodesa['Fecha Vta'], Clikstore['FECHA'], Cklass['Fecha'], Ecomm['Fecha  ']], ignore_index=True)
-                Sell_Out_Retail['COD TIPO'] = ""
-                Sell_Out_Retail['TIPO'] = ""
-                Sell_Out_Retail['SKU'] = pd.concat([Coppel['Código'], Liverpool['Artículo'], Sears['SKU'], Suburbia['SKU'], Mavi['CODIGO'], Bodesa['Materia'], Clikstore['SAP'], Cklass['Material'], Ecomm['Unido']], ignore_index=True)
+
+                Sell_Out_Retail['FECHA'] = pd.concat([
+                    Coppel['Fecha Venta'], Liverpool['Día/Periodo'], Sears['FECHA'], Suburbia['Día'],
+                    Mavi['FECHA FACT'], Bodesa['Fecha Vta'], Clikstore['FECHA'], Cklass['Fecha'], Ecomm['Fecha  ']
+                ], ignore_index=True)
+
+                Sell_Out_Retail['COD TIPO']   = ""
+                Sell_Out_Retail['TIPO']        = ""
+
+                Sell_Out_Retail['SKU'] = pd.concat([
+                    Coppel['Código'], Liverpool['Artículo'], Sears['SKU'], Suburbia['SKU'],
+                    Mavi['CODIGO'], Bodesa['Materia'], Clikstore['SAP'], Cklass['Material'], Ecomm['Unido']
+                ], ignore_index=True)
+
                 Sell_Out_Retail['DESCRIPCION'] = "RE"
-                Sell_Out_Retail['ESTADO'] = ""
-                Sell_Out_Retail['QTY'] = pd.concat([Coppel['QTY'], Liverpool['Ventas Unidades'], Sears['CANT'], Suburbia['VENTA UNIDADES'], Mavi['CANT.'], Bodesa['Vta pzas'], Clikstore['Cantidad'], Cklass['Cantidad'], Ecomm['Cant']], ignore_index=True).astype('Int64')
+                Sell_Out_Retail['ESTADO']       = ""
+
+                Sell_Out_Retail['QTY'] = pd.concat([
+                    Coppel['QTY'], Liverpool['Ventas Unidades'], Sears['CANT'], Suburbia['VENTA UNIDADES'],
+                    Mavi['CANT.'], Bodesa['Vta pzas'], Clikstore['Cantidad'], Cklass['Cantidad'], Ecomm['Cant']
+                ], ignore_index=True).astype('Int64')
+
                 Sell_Out_Retail['MONTO'] = ""
-                Sell_Out_Retail['N° ARTICULO'] = pd.concat([Coppel['Item Number'], Liverpool['Item Number'], Sears['Item Number'], Suburbia['Item Number'], Mavi['Item Number'], Bodesa['Item Number'], Clikstore['Item Number'], Cklass['Item Number'], Ecomm['Item Number']], ignore_index=True)
-                Sell_Out_Retail['ID'] = pd.concat([Coppel['Tienda'], Liverpool['Centro'], Sears['TDA'], Suburbia['CENTRO'], Mavi['TIENDA'], Bodesa['Centro'], Clikstore['ID SUC'], Cklass['ID'], Ecomm['Id']], ignore_index=True)
-                Sell_Out_Retail['STORE'] = pd.concat([Coppel['SUCURSAL'], Liverpool['SUCURSAL'], Sears['SUCURSAL'], Suburbia['SUCURSAL'], Mavi['SUCURSAL'], Bodesa['SUCURSAL'], Clikstore['SUCURSAL'], Cklass['SUCURSAL'], Ecomm['Sucursal']], ignore_index=True)
-                Sell_Out_Retail['ID RETAIL'] = pd.concat([Coppel['Id Retail'], Liverpool['IDRETAIL'], Sears['IDRETAIL'], Suburbia['IDRETAIL'], Mavi['IDRETAIL'], Bodesa['IDRETAIL'], Clikstore['IDRETAIL'], Cklass['IDRETAIL'], Ecomm['idStore']], ignore_index=True)
+
+                Sell_Out_Retail['N° ARTICULO'] = pd.concat([
+                    Coppel['Item Number'], Liverpool['Item Number'], Sears['Item Number'], Suburbia['Item Number'],
+                    Mavi['Item Number'], Bodesa['Item Number'], Clikstore['Item Number'], Cklass['Item Number'], Ecomm['Item Number']
+                ], ignore_index=True)
+
+                Sell_Out_Retail['ID'] = pd.concat([
+                    Coppel['Tienda'], Liverpool['Centro'], Sears['TDA'], Suburbia['CENTRO'],
+                    Mavi['TIENDA'], Bodesa['Centro'], Clikstore['ID SUC'], Cklass['ID'], Ecomm['Id']
+                ], ignore_index=True)
+
+                Sell_Out_Retail['STORE'] = pd.concat([
+                    Coppel['SUCURSAL'], Liverpool['SUCURSAL'], Sears['SUCURSAL'], Suburbia['SUCURSAL'],
+                    Mavi['SUCURSAL'], Bodesa['SUCURSAL'], Clikstore['SUCURSAL'], Cklass['SUCURSAL'], Ecomm['Sucursal']
+                ], ignore_index=True)
+
+                Sell_Out_Retail['ID RETAIL'] = pd.concat([
+                    Coppel['Id Retail'], Liverpool['IDRETAIL'], Sears['IDRETAIL'], Suburbia['IDRETAIL'],
+                    Mavi['IDRETAIL'], Bodesa['IDRETAIL'], Clikstore['IDRETAIL'], Cklass['IDRETAIL'], Ecomm['idStore']
+                ], ignore_index=True)
 
                 # Columnas Fecha
-                Sell_Out_Retail['Fecha del documento 2'] = pd.to_datetime(Sell_Out_Retail['FECHA'], errors='coerce')
-                Sell_Out_Retail['MES'] = Sell_Out_Retail['Fecha del documento 2'].dt.month_name()
-                Sell_Out_Retail['MES - AÑO'] = Sell_Out_Retail['MES'] + " " + Sell_Out_Retail['Fecha del documento 2'].dt.strftime('%Y')
-                Sell_Out_Retail['AÑO'] = Sell_Out_Retail['Fecha del documento 2'].dt.strftime('%Y')
-                Sell_Out_Retail = Sell_Out_Retail.drop(columns='Fecha del documento 2')
+                Sell_Out_Retail['_fecha_tmp'] = pd.to_datetime(Sell_Out_Retail['FECHA'], errors='coerce')
+                Sell_Out_Retail['MES']         = Sell_Out_Retail['_fecha_tmp'].dt.month_name()
+                Sell_Out_Retail['MES - AÑO']   = Sell_Out_Retail['MES'] + " " + Sell_Out_Retail['_fecha_tmp'].dt.strftime('%Y')
+                Sell_Out_Retail['AÑO']         = Sell_Out_Retail['_fecha_tmp'].dt.strftime('%Y')
+                Sell_Out_Retail = Sell_Out_Retail.drop(columns='_fecha_tmp')
 
-                Sell_Out_Retail['ID'] = Sell_Out_Retail['ID'].astype('str')
+                Sell_Out_Retail['ID']        = Sell_Out_Retail['ID'].astype('str')
                 Sell_Out_Retail['ID RETAIL'] = Sell_Out_Retail['ID'] + Sell_Out_Retail['CANAL']
 
-                # Columna CC
-                CATALOGO_MODELO['CILINDRADA'] = CATALOGO_MODELO['CILINDRADA'].fillna(0).astype('int64')
-                CATALOGO_MODELO['CILINDRADA'] = CATALOGO_MODELO['CILINDRADA'].astype('str')
-                CATALOGO_MODELO['CILINDRADA'] = CATALOGO_MODELO['CILINDRADA'] + "CC"
+                # Columnas desde Catálogo Modelo
+                CATALOGO_MODELO['CILINDRADA'] = (
+                    CATALOGO_MODELO['CILINDRADA'].fillna(0).astype('int64').astype('str') + "CC"
+                )
+                serie_cc    = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'CILINDRADA',  case='upper')
+                serie_mkt   = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'MKT NAME',    case='upper')
+                serie_anio  = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'AÑO MODEL',   case='upper')
+                serie_color = mapeo_seguro(CATALOGO_MODELO, 'NÚMERO DE ARTÍCULO (SAP)', 'COLOR MODEL', case='upper')
 
-                mapeo_items = CATALOGO_MODELO.drop_duplicates(subset=['NÚMERO DE ARTÍCULO (SAP)'], keep='first')
-                mapeo_items['NÚMERO DE ARTÍCULO (SAP)'] = mapeo_items['NÚMERO DE ARTÍCULO (SAP)'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('NÚMERO DE ARTÍCULO (SAP)')['CILINDRADA']
-
-                Sell_Out_Retail['CC'] = Sell_Out_Retail['N° ARTICULO'].map(mapeo_series)
-
-                # Columna Modelo
-                mapeo_items['NÚMERO DE ARTÍCULO (SAP)'] = mapeo_items['NÚMERO DE ARTÍCULO (SAP)'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('NÚMERO DE ARTÍCULO (SAP)')['MKT NAME']
-                Sell_Out_Retail['MODELO'] = Sell_Out_Retail['N° ARTICULO'].map(mapeo_series)
-
-                # Columna Año Modelo
-                mapeo_items['NÚMERO DE ARTÍCULO (SAP)'] = mapeo_items['NÚMERO DE ARTÍCULO (SAP)'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('NÚMERO DE ARTÍCULO (SAP)')['AÑO MODEL']
-                Sell_Out_Retail['AÑO MODELO'] = Sell_Out_Retail['N° ARTICULO'].map(mapeo_series)
+                art_upper = Sell_Out_Retail['N° ARTICULO'].astype(str).str.strip().str.upper()
+                Sell_Out_Retail['CC']         = art_upper.map(serie_cc)
+                Sell_Out_Retail['MODELO']     = art_upper.map(serie_mkt)
+                Sell_Out_Retail['AÑO MODELO'] = art_upper.map(serie_anio)
                 Sell_Out_Retail['AÑO MODELO'] = Sell_Out_Retail['AÑO MODELO'].astype('Int64')
+                Sell_Out_Retail['COLOR']      = art_upper.map(serie_color)
+                Sell_Out_Retail['MOD COLOR']  = Sell_Out_Retail['MODELO'] + " " + Sell_Out_Retail['COLOR']
 
-                # Columna Color
-                mapeo_items['NÚMERO DE ARTÍCULO (SAP)'] = mapeo_items['NÚMERO DE ARTÍCULO (SAP)'].astype('str').str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('NÚMERO DE ARTÍCULO (SAP)')['COLOR MODEL']
-                Sell_Out_Retail['COLOR'] = Sell_Out_Retail['N° ARTICULO'].map(mapeo_series)
-
-                # Columna Mod Color
-                Sell_Out_Retail['MOD COLOR'] = Sell_Out_Retail['MODELO'] + " " + Sell_Out_Retail['COLOR']
-
-                # Columna State
-                CATALOGO_SUCURSALES['IDRETAIL'] = (
-                    CATALOGO_SUCURSALES['ID Sucursal'].astype(str).str.strip() +
-                    CATALOGO_SUCURSALES['Cadena'].astype(str).str.strip()
-                )
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['IDRETAIL'], keep='first')
-                mapeo_items['IDRETAIL'] = mapeo_items['IDRETAIL'].astype(str).str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('IDRETAIL')['Estado']
-                Sell_Out_Retail['STATE'] = Sell_Out_Retail['ID RETAIL'].map(mapeo_series)
-
-                # Columna City
-                CATALOGO_SUCURSALES['IDRETAIL'] = (
-                    CATALOGO_SUCURSALES['ID Sucursal'].astype(str).str.strip() +
-                    CATALOGO_SUCURSALES['Cadena'].astype(str).str.strip()
-                )
-                mapeo_items = CATALOGO_SUCURSALES.drop_duplicates(subset=['IDRETAIL'], keep='first')
-                mapeo_items['IDRETAIL'] = mapeo_items['IDRETAIL'].astype(str).str.strip().str.upper()
-                mapeo_series = mapeo_items.set_index('IDRETAIL')['Municipio']
-                Sell_Out_Retail['CITY'] = Sell_Out_Retail['ID RETAIL'].map(mapeo_series)
+                # Columnas State y City
+                id_retail_upper = Sell_Out_Retail['ID RETAIL'].astype(str).str.strip().str.upper()
+                Sell_Out_Retail['STATE'] = id_retail_upper.map(serie_suc('Estado'))
+                Sell_Out_Retail['CITY']  = id_retail_upper.map(serie_suc('Municipio'))
 
                 # Columna ID Store
-                Sell_Out_Retail['ID'] = Sell_Out_Retail['ID'].astype(str)
-                Sell_Out_Retail['STORE'] = Sell_Out_Retail['STORE'].astype(str)
+                Sell_Out_Retail['ID']       = Sell_Out_Retail['ID'].astype(str)
+                Sell_Out_Retail['STORE']    = Sell_Out_Retail['STORE'].astype(str)
                 Sell_Out_Retail['ID STORE'] = Sell_Out_Retail['ID'] + "-" + Sell_Out_Retail['STORE']
 
                 st.success("✅ Consolidación lista")
