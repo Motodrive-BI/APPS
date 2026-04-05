@@ -111,10 +111,35 @@ elif opcion == "Reporte de Sell Out Global":
         df['Teléfono'] = df['Teléfono'].astype(str)
         df['Fecha de fabricación'] = pd.to_datetime(df['Fecha de fabricación'], errors='coerce')
 
-        columnas = [
-            'Fecha del documento', 'Vendedor', 'Familia del modelo',
-            'Nombre del Modelo', 'Item', 'Cantidad', 'Precio'
-        ]
+        columnas = 	['Fecha del documento',
+                           'Vendedor',
+                           'Familia del modelo',
+                           'Familia de submodelos',
+                           'Nombre del Modelo',
+                           'Color',
+                           'Item',
+                           'No Serie / VIN',
+                           'Gerente Regional',
+                           'Codigo de Compañía',
+                           'Compañía',
+                           'Código de sucursal',
+                           'Sucursal',
+                           'Campaña',
+                           'Financiera',
+                           'Tipo Operacion MotoDrive ',
+                           'Proveedor de seguros',
+                           'Género',
+                           'Estatus',
+                           'Status',
+                           'Nombre del Canal',
+                           'Fuente',
+                           'Cantidad',
+                           'Precio',
+                           'Descuento',
+                           'Monto del descuento',
+                           'Precio total de venta sin IVA',
+                           'Precio total de venta con IVA'
+                    ]
 
         columnas_existentes = [c for c in columnas if c in df.columns]
         df_final = df[columnas_existentes]
