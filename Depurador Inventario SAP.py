@@ -157,7 +157,8 @@ elif opcion == "Reporte de Sell Out Global":
             'Precio total de venta sin IVA',
             'Precio total de venta con IVA'
         ]
-        
+
+        df_final.insert(16, 'Proveedor de seguros', "")
         columnas_existentes = [c for c in columnas_reporte if c in df.columns]
         df_final = df[columnas_existentes]
 
